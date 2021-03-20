@@ -53,7 +53,7 @@ var xhr = new XMLHttpRequest();
 xhr.onreadystatechange=function(){
 if(this.readyState==4&&xhr.status==200){
 var e = document.getElementById('timezone');
-for(i of this.responseText.split('\\n')){
+for(i of this.responseText.split('\\n').sort()){
 e.appendChild(new Option(i, i));
 }
 }
@@ -82,6 +82,8 @@ WebServer Server;
 AutoConnect       Portal(Server);
 AutoConnectConfig Config;       // Enable autoReconnect supported on v0.9.4
 AutoConnectAux    Timezone;
+const basic::ZoneInfo *zoneInfo = &zonedb::kZoneEtc_UTC;
+BasicZoneProcessor zoneProcessor;
 
 void rootPage() {
   String  content =
@@ -99,32 +101,35 @@ void rootPage() {
     "<p></p><p style=\"padding-top:15px;text-align:center\">" AUTOCONNECT_LINK(COG_24) "</p>"
     "</body>"
     "</html>";
-  static const char *wd[7] = { "Sun","Mon","Tue","Wed","Thr","Fri","Sat" };
-  struct tm *tm;
-  time_t  t;
-  char    dateTime[26];
-
-  t = time(NULL);
-  tm = localtime(&t);
-  sprintf(dateTime, "%04d/%02d/%02d(%s) %02d:%02d:%02d.",
-    tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
-    wd[tm->tm_wday],
-    tm->tm_hour, tm->tm_min, tm->tm_sec);
-  content.replace("{{DateTime}}", String(dateTime));
+  
+  TimeZone zone = TimeZone::forZoneInfo(zoneInfo, &zoneProcessor);
+  auto zdt = ZonedDateTime::forUnixSeconds(time(NULL), zone);
+  // Gah, it still fails sometimes
+  if (zdt.isError()) {
+    Server.send(500, "text/html", F("Error creating ZonedDateTime"));
+    return;
+  }
+  ace_common::PrintStr<64> dateTime;
+  zdt.printTo(dateTime);
+  
+  content.replace("{{DateTime}}", dateTime.getCstr());
   
   Server.send(200, "text/html", content);
 }
-
+basic::ZoneRegistrar zoneRegistrar(zonedb::kZoneRegistrySize, zonedb::kZoneRegistry);
 void startPage() {
   // Retrieve the value of AutoConnectElement with arg function of WebServer class.
   // Values are accessible with the element name.
   String tz = Server.arg("timezone");
-  Serial.println(tz);
+  tz.trim();
+  
   // Get Zone by name
   //BasicZoneManager<1> zoneManager(zonedb::kZoneRegistrySize, zonedb::kZoneRegistry);
-  //TimeZone zone = zoneManager.createForZoneName(tz.c_str());
-  //zone.printTo(Serial);
-  //configTime(0, 0, "pool.ntp.org");
+  //zone = zoneManager.createForZoneName(tz.c_str());
+  zoneInfo = zoneRegistrar.getZoneInfoForName(tz.c_str());
+  // TODO: Check for null pointer
+
+  configTime("UTC", "pool.ntp.org");
 
   // The /start page just constitutes timezone,
   // it redirects to the root page without the content response.
