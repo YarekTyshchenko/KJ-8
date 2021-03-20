@@ -73,40 +73,6 @@ xhr.send();
 }
 )";
 
-/*
-typedef struct {
-  const char* zone;
-  const char* ntpServer;
-  int8_t      tzoff;
-} Timezone_t;
-
-static const Timezone_t TZ[] = {
-  { "Europe/London", "europe.pool.ntp.org", 0 },
-  { "Europe/Berlin", "europe.pool.ntp.org", 1 },
-  { "Europe/Helsinki", "europe.pool.ntp.org", 2 },
-  { "Europe/Moscow", "europe.pool.ntp.org", 3 },
-  { "Asia/Dubai", "asia.pool.ntp.org", 4 },
-  { "Asia/Karachi", "asia.pool.ntp.org", 5 },
-  { "Asia/Dhaka", "asia.pool.ntp.org", 6 },
-  { "Asia/Jakarta", "asia.pool.ntp.org", 7 },
-  { "Asia/Manila", "asia.pool.ntp.org", 8 },
-  { "Asia/Tokyo", "asia.pool.ntp.org", 9 },
-  { "Australia/Brisbane", "oceania.pool.ntp.org", 10 },
-  { "Pacific/Noumea", "oceania.pool.ntp.org", 11 },
-  { "Pacific/Auckland", "oceania.pool.ntp.org", 12 },
-  { "Atlantic/Azores", "europe.pool.ntp.org", -1 },
-  { "America/Noronha", "south-america.pool.ntp.org", -2 },
-  { "America/Araguaina", "south-america.pool.ntp.org", -3 },
-  { "America/Blanc-Sablon", "north-america.pool.ntp.org", -4},
-  { "America/New_York", "north-america.pool.ntp.org", -5 },
-  { "America/Chicago", "north-america.pool.ntp.org", -6 },
-  { "America/Denver", "north-america.pool.ntp.org", -7 },
-  { "America/Los_Angeles", "north-america.pool.ntp.org", -8 },
-  { "America/Anchorage", "north-america.pool.ntp.org", -9 },
-  { "Pacific/Honolulu", "north-america.pool.ntp.org", -10 },
-  { "Pacific/Samoa", "oceania.pool.ntp.org", -11 }
-};
-*/
 #if defined(ARDUINO_ARCH_ESP8266)
 ESP8266WebServer Server;
 #elif defined(ARDUINO_ARCH_ESP32)
@@ -149,33 +115,16 @@ void rootPage() {
   Server.send(200, "text/html", content);
 }
 
-clock::NtpClock ntpClock;
-
 void startPage() {
   // Retrieve the value of AutoConnectElement with arg function of WebServer class.
   // Values are accessible with the element name.
   String tz = Server.arg("timezone");
   Serial.println(tz);
   // Get Zone by name
-  BasicZoneManager<1> zoneManager(zonedb::kZoneRegistrySize, zonedb::kZoneRegistry);
-  TimeZone zone = zoneManager.createForZoneName(tz.c_str());
-  zone.printTo(Serial);
-  //zone.toTimeZoneData().stdOffsetMinutes;  
-  //sntp_stop();
-  //sntp_setservername(0, "pool.ntp.org");
-  //sntp_init();
-  configTime(0, 0, "pool.ntp.org");
-  /*
-  for (uint8_t n = 0; n < sizeof(TZ) / sizeof(Timezone_t); n++) {
-    String  tzName = String(TZ[n].zone);
-    if (tz.equalsIgnoreCase(tzName)) {
-      configTime(TZ[n].tzoff * 3600, 0, TZ[n].ntpServer);
-      Serial.println("Time zone: " + tz);
-      Serial.println("ntp server: " + String(TZ[n].ntpServer));
-      break;
-    }
-  }*/
-  
+  //BasicZoneManager<1> zoneManager(zonedb::kZoneRegistrySize, zonedb::kZoneRegistry);
+  //TimeZone zone = zoneManager.createForZoneName(tz.c_str());
+  //zone.printTo(Serial);
+  //configTime(0, 0, "pool.ntp.org");
 
   // The /start page just constitutes timezone,
   // it redirects to the root page without the content response.
@@ -186,12 +135,8 @@ void startPage() {
 }
 
 void streamTimezones() {
-  bool chunked = Server.chunkedResponseModeStart(200, "text/plain");
-  if (chunked) {
-    Serial.println("Chunked mode: Yes");
-  } else {
-    Serial.println("Chunked mode no");
-  }
+  // TODO: What to do if this returns false?
+  Server.chunkedResponseModeStart(200, "text/plain");
   for(uint16_t n = 0; n < zonedb::kZoneRegistrySize; n++) {
     auto a = zonedb::kZoneRegistry[n];
     BasicZone basicZone(a);
@@ -212,25 +157,11 @@ void setup() {
   // Enable saved past credential by autoReconnect option,
   // even once it is disconnected.
   Config.autoReconnect = true;
+  Config.ticker = true;
   Portal.config(Config);
 
   // Load aux. page
   Timezone.load(AUX_TIMEZONE);
-  // Retrieve the select element that holds the time zone code and
-  // register the zone mnemonic in advance.
-  //AutoConnectSelect&  tz = Timezone["timezone"].as<AutoConnectSelect>();
-  // Comment out static timezone population
-  //for (uint8_t n = 0; n < sizeof(TZ) / sizeof(Timezone_t); n++) {
-  //  tz.add(String(TZ[n].zone));
-  //}
-  //for(uint16_t n = 0; n < 100; n++) {
-  //  auto a = zonedb::kZoneRegistry[n];
-  //  BasicZone basicZone(a);
-  //  ace_common::PrintStr<32> printString;
-  //  basicZone.printNameTo(printString);
-  //  tz.add(printString.getCstr());  
-  //}
-
   Portal.join({ Timezone });        // Register aux. page
 
   // Behavior a root path of ESP8266WebServer.
