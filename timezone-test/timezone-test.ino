@@ -36,38 +36,41 @@ static const char AUX_TIMEZONE[] PROGMEM = R"(
     {
       "name": "timezone",
       "type": "ACSelect",
-      "label": "Select TZ name",
-      "option": [],
-      "selected": 10
+      "label": "Select TimeZone",
+      "option": []
     },
     {
-      "name": "newline",
-      "type": "ACElement",
-      "value": "<br>"
-    },
-    {
-      "name": "js",
       "type": "ACElement",
       "value": "<script type='text/javascript'>
-var xhr = new XMLHttpRequest();
+window.onload=function(){
+var xhr=new XMLHttpRequest();
 xhr.onreadystatechange=function(){
 if(this.readyState==4&&xhr.status==200){
-var e = document.getElementById('timezone');
-for(i of this.responseText.split('\\n').sort()){
+var currentZone=xhr.getResponseHeader('x-current-zone');
+var e=document.getElementById('timezone');
+for(var i of this.responseText.split('\\n').sort()){
+i=i.trim()
+if(i){
 e.appendChild(new Option(i, i));
 }
 }
+for(var v = 0;v<e.options.length;v++){
+var o=e.options[v];
+if(o.value==currentZone) o.selected=true;
 }
-xhr.open('GET', '/timezonestream');
+}
+}
+xhr.open('GET', '/stream_timezones');
 xhr.responseType='text';
 xhr.send();
+}
 </script>"
     },
     {
       "name": "start",
       "type": "ACSubmit",
-      "value": "OK",
-      "uri": "/start"
+      "value": "Set TimeZone",
+      "uri": "/set_timezone"
     }
   ]
 }
@@ -82,8 +85,13 @@ WebServer Server;
 AutoConnect       Portal(Server);
 AutoConnectConfig Config;       // Enable autoReconnect supported on v0.9.4
 AutoConnectAux    Timezone;
+
+basic::ZoneRegistrar zoneRegistrar(zonedb::kZoneRegistrySize, zonedb::kZoneRegistry);
 const basic::ZoneInfo *zoneInfo = &zonedb::kZoneEtc_UTC;
 BasicZoneProcessor zoneProcessor;
+
+clock::NtpClock ntpClock("pool.ntp.org");
+clock::SystemClockLoop systemClock(&ntpClock, nullptr, 60);
 
 void rootPage() {
   String  content =
@@ -95,16 +103,16 @@ void rootPage() {
     "</script>"
     "</head>"
     "<body>"
-    "<h2 align=\"center\" style=\"color:blue;margin:20px;\">Hello, world</h2>"
+    "<h2 align=\"center\" style=\"color:blue;margin:20px;\">Last Sync time:</h2>"
     "<h3 align=\"center\" style=\"color:gray;margin:10px;\">{{DateTime}}</h3>"
     "<p style=\"text-align:center;\">Reload the page to update the time.</p>"
     "<p></p><p style=\"padding-top:15px;text-align:center\">" AUTOCONNECT_LINK(COG_24) "</p>"
     "</body>"
     "</html>";
   
+  acetime_t lastSyncTime = systemClock.getLastSyncTime();
   TimeZone zone = TimeZone::forZoneInfo(zoneInfo, &zoneProcessor);
-  auto zdt = ZonedDateTime::forUnixSeconds(time(NULL), zone);
-  // Gah, it still fails sometimes
+  auto zdt = ZonedDateTime::forEpochSeconds(lastSyncTime, zone);
   if (zdt.isError()) {
     Server.send(500, "text/html", F("Error creating ZonedDateTime"));
     return;
@@ -116,7 +124,29 @@ void rootPage() {
   
   Server.send(200, "text/html", content);
 }
-basic::ZoneRegistrar zoneRegistrar(zonedb::kZoneRegistrySize, zonedb::kZoneRegistry);
+
+acetime_t now;
+void showClock() {
+  acetime_t newNow = systemClock.getNow();
+  if (now == newNow) {
+    return;
+  }
+  now = newNow;
+  Serial.println(now);
+  Serial.print("Last synced time: ");
+  Serial.println(systemClock.getLastSyncTime());
+  TimeZone zone = TimeZone::forZoneInfo(zoneInfo, &zoneProcessor);
+  auto zdt = ZonedDateTime::forEpochSeconds(now, zone);
+  if (zdt.isError()) {
+    Serial.println(F("Error creating ZonedDateTime"));
+    return;
+  }
+  ace_common::PrintStr<64> dateTime;
+  zdt.printTo(dateTime);
+
+  Serial.println(dateTime.getCstr());
+}
+
 void startPage() {
   // Retrieve the value of AutoConnectElement with arg function of WebServer class.
   // Values are accessible with the element name.
@@ -124,15 +154,13 @@ void startPage() {
   tz.trim();
   
   // Get Zone by name
-  //BasicZoneManager<1> zoneManager(zonedb::kZoneRegistrySize, zonedb::kZoneRegistry);
-  //zone = zoneManager.createForZoneName(tz.c_str());
-  zoneInfo = zoneRegistrar.getZoneInfoForName(tz.c_str());
-  // TODO: Check for null pointer
+  const basic::ZoneInfo *selectedZone = zoneRegistrar.getZoneInfoForName(tz.c_str());
+  if (selectedZone) {
+    // Save it in memory
+    zoneInfo = selectedZone;
+  }
 
-  configTime("UTC", "pool.ntp.org");
-
-  // The /start page just constitutes timezone,
-  // it redirects to the root page without the content response.
+  // Redirect to Root
   Server.sendHeader("Location", String("http://") + Server.client().localIP().toString() + String("/"));
   Server.send(302, "text/plain", "");
   Server.client().flush();
@@ -140,16 +168,23 @@ void startPage() {
 }
 
 void streamTimezones() {
+  ace_common::PrintStr<32> printer;
+
+  // Send current timezone in a header
+  BasicZone currentZone(zoneInfo);
+  currentZone.printNameTo(printer);
+  Server.sendHeader("x-current-zone", printer.getCstr());
+  printer.flush();
+
   // TODO: What to do if this returns false?
   Server.chunkedResponseModeStart(200, "text/plain");
   for(uint16_t n = 0; n < zonedb::kZoneRegistrySize; n++) {
     auto a = zonedb::kZoneRegistry[n];
     BasicZone basicZone(a);
-    ace_common::PrintStr<32> printString;
-    basicZone.printNameTo(printString);
-    printString.println();
-    auto s = printString.getCstr();
-    Server.sendContent(s);
+    basicZone.printNameTo(printer);
+    printer.println();
+    Server.sendContent(printer.getCstr());
+    printer.flush();
   }
   Server.chunkedResponseFinalize();
 }
@@ -159,6 +194,9 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
 
+  ntpClock.setup();
+  systemClock.setup();
+
   // Enable saved past credential by autoReconnect option,
   // even once it is disconnected.
   Config.autoReconnect = true;
@@ -167,12 +205,13 @@ void setup() {
 
   // Load aux. page
   Timezone.load(AUX_TIMEZONE);
-  Portal.join({ Timezone });        // Register aux. page
+  Portal.join(Timezone);        // Register aux. page
 
   // Behavior a root path of ESP8266WebServer.
   Server.on("/", rootPage);
-  Server.on("/start", startPage);   // Set NTP server trigger handler
-  Server.on("/timezonestream", streamTimezones);
+  // Set NTP server trigger handler
+  Server.on("/set_timezone", startPage);
+  Server.on("/stream_timezones", streamTimezones);
 
   // Establish a connection with an autoReconnect option.
   if (Portal.begin()) {
@@ -182,4 +221,7 @@ void setup() {
 
 void loop() {
   Portal.handleClient();
+  systemClock.loop();
+
+  showClock();
 }
