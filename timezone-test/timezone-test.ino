@@ -46,13 +46,11 @@ window.onload=function(){
 var xhr=new XMLHttpRequest();
 xhr.onreadystatechange=function(){
 if(this.readyState==4&&xhr.status==200){
-var currentZone=xhr.getResponseHeader('x-current-zone');
+var currentZone=xhr.getResponseHeader('x-current-zone-id');
 var e=document.getElementById('timezone');
-for(var i of this.responseText.split('\\n').sort()){
-i=i.trim()
-if(i){
-e.appendChild(new Option(i, i));
-}
+for(var i of this.responseText.trim().split('\\n').sort()){
+var [name, id]=i.trim().split('|');
+e.appendChild(new Option(name, id));
 }
 for(var v = 0;v<e.options.length;v++){
 var o=e.options[v];
@@ -152,13 +150,20 @@ void startPage() {
   // Values are accessible with the element name.
   String tz = Server.arg("timezone");
   tz.trim();
-  
+  auto zoneId = tz.toInt();
+  if (0) {
+    return;
+  }
+  const basic::ZoneInfo *selectedZone = zoneRegistrar.getZoneInfoForId(zoneId);
+  if (!selectedZone) {
+    return;
+  }
   // Get Zone by name
-  const basic::ZoneInfo *selectedZone = zoneRegistrar.getZoneInfoForName(tz.c_str());
-  if (selectedZone) {
+  //const basic::ZoneInfo *selectedZone = zoneRegistrar.getZoneInfoForName(tz.c_str());
+  //if (selectedZone) {
     // Save it in memory
     zoneInfo = selectedZone;
-  }
+  //}
 
   // Redirect to Root
   Server.sendHeader("Location", String("http://") + Server.client().localIP().toString() + String("/"));
@@ -168,12 +173,13 @@ void startPage() {
 }
 
 void streamTimezones() {
-  ace_common::PrintStr<32> printer;
+  ace_common::PrintStr<128> printer;
 
   // Send current timezone in a header
   BasicZone currentZone(zoneInfo);
   currentZone.printNameTo(printer);
   Server.sendHeader("x-current-zone", printer.getCstr());
+  Server.sendHeader("x-current-zone-id", String(zoneInfo->zoneId));
   printer.flush();
 
   // TODO: What to do if this returns false?
@@ -181,8 +187,13 @@ void streamTimezones() {
   for(uint16_t n = 0; n < zonedb::kZoneRegistrySize; n++) {
     auto a = zonedb::kZoneRegistry[n];
     BasicZone basicZone(a);
+
+    // Format: Zone_Name|<zone_id>\n
     basicZone.printNameTo(printer);
+    printer.print('|');
+    printer.print(a->zoneId);
     printer.println();
+
     Server.sendContent(printer.getCstr());
     printer.flush();
   }
@@ -196,6 +207,8 @@ void setup() {
 
   ntpClock.setup();
   systemClock.setup();
+  // Set clock to 0 to prevent issues with Zones before sync.
+  systemClock.setNow(0);
 
   // Enable saved past credential by autoReconnect option,
   // even once it is disconnected.
