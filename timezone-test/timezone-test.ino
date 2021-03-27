@@ -75,13 +75,11 @@ AutoConnect       Portal(Server);
 AutoConnectConfig Config;
 AutoConnectAux    Timezone;
 
-basic::ZoneRegistrar zoneRegistrar(zonedb::kZoneRegistrySize, zonedb::kZoneRegistry);
-BasicZoneProcessor zoneProcessor;
+uint32_t zoneId = zonedb::kZoneEtc_UTC.zoneId;
+static BasicZoneManager<1> zoneManager(zonedb::kZoneRegistrySize, zonedb::kZoneRegistry);
 
 clock::NtpClock ntpClock("pool.ntp.org");
 clock::SystemClockLoop systemClock(&ntpClock, nullptr, 60);
-
-uint32_t zoneId = zonedb::kZoneEtc_UTC.zoneId;
 
 void rootPage() {
   String  content =
@@ -100,8 +98,7 @@ void rootPage() {
     "</body>"
     "</html>";
   
-  const basic::ZoneInfo *zoneInfo2 = zoneRegistrar.getZoneInfoForId(zoneId);
-  TimeZone zone = TimeZone::forZoneInfo(zoneInfo2, &zoneProcessor);
+  TimeZone zone = zoneManager.createForZoneId(zoneId);
   
   acetime_t lastSyncTime = systemClock.getLastSyncTime();
   auto zdt = ZonedDateTime::forEpochSeconds(lastSyncTime, zone);
@@ -128,9 +125,7 @@ void showClock() {
   Serial.print("Last synced time: ");
   Serial.println(systemClock.getLastSyncTime());
 
-  const basic::ZoneInfo *zoneInfo2 = zoneRegistrar.getZoneInfoForId(zoneId);
-  TimeZone zone = TimeZone::forZoneInfo(zoneInfo2, &zoneProcessor);
-
+  TimeZone zone = zoneManager.createForZoneId(zoneId);
   auto zdt = ZonedDateTime::forEpochSeconds(now, zone);
   if (zdt.isError()) {
     Serial.println(F("Error creating ZonedDateTime"));
@@ -152,14 +147,19 @@ void setTimezonePage() {
     Server.send(500, "text/html", F("Invalid Zone ID"));
     return;
   }
-  // Get Zone by Id
-  const basic::ZoneInfo *selectedZone = zoneRegistrar.getZoneInfoForId(selectedZoneId);
-  if (!selectedZone) {
+  // Check zone is valid
+  //auto index = zoneManager.indexForZoneId(selectedZoneId);
+  //if (index == ZoneManager::kInvalidIndex) {
+  //  Server.send(500, "text/html", F("Zone ID not found in registrar"));
+  //  return;
+  //}
+  auto selectedZone = zoneManager.createForZoneId(selectedZoneId);
+  if (selectedZone.isError()) {
     Server.send(500, "text/html", F("Zone ID not found in registrar"));
     return;
   }
   // Save it in memory
-  zoneId = selectedZone->zoneId;
+  zoneId = selectedZone.getZoneId();
   
   // Redirect to Root
   Server.sendHeader("Location", String("http://") + Server.client().localIP().toString() + String("/"));
