@@ -121,9 +121,7 @@ void showClock() {
     return;
   }
   now = newNow;
-  Serial.print("Last synced time: ");
-  Serial.println(now);
-  Serial.println(systemClock.getLastSyncTime());
+  //systemClock.getLastSyncTime();
 
   TimeZone zone = zoneManager.createForZoneId(zoneId);
   auto zdt = ZonedDateTime::forEpochSeconds(now, zone);
