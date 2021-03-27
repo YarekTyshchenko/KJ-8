@@ -121,8 +121,8 @@ void showClock() {
     return;
   }
   now = newNow;
-  Serial.println(now);
   Serial.print("Last synced time: ");
+  Serial.println(now);
   Serial.println(systemClock.getLastSyncTime());
 
   TimeZone zone = zoneManager.createForZoneId(zoneId);
@@ -160,6 +160,8 @@ void setTimezonePage() {
   }
   // Save it in memory
   zoneId = selectedZone.getZoneId();
+  EEPROM.put(0, zoneId);
+  EEPROM.commit();
   
   // Redirect to Root
   Server.sendHeader("Location", String("http://") + Server.client().localIP().toString() + String("/"));
@@ -195,7 +197,7 @@ void setup() {
   delay(1000);
   Serial.begin(115200);
   Serial.println();
-
+  
   ntpClock.setup();
   systemClock.setup();
   // Set clock to 0 to prevent issues with Zones before sync.
@@ -203,9 +205,22 @@ void setup() {
 
   // Enable saved past credential by autoReconnect option,
   // even once it is disconnected.
+  Config.boundaryOffset = sizeof(uint32_t);
   Config.autoReconnect = true;
   Config.ticker = true;
   Portal.config(Config);
+
+  // EEPROM Config
+  EEPROM.begin(sizeof(uint32_t));
+  uint32_t storedZoneId;
+  EEPROM.get(0, storedZoneId);
+  auto selectedZone = zoneManager.createForZoneId(storedZoneId);
+  if (!selectedZone.isError()) {
+    Serial.println(storedZoneId);
+    zoneId = storedZoneId;
+  } else {
+    Serial.println(F("Invalid Zone ID from EEPROM"));
+  }
 
   // Load aux. page
   Timezone.load(AUX_TIMEZONE);
