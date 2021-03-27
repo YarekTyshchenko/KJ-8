@@ -1,12 +1,3 @@
-/*
-  Simple.ino, Example for the AutoConnect library.
-  Copyright (c) 2018, Hieromon Ikasamo
-  https://github.com/Hieromon/AutoConnect
-
-  This software is released under the MIT License.
-  https://opensource.org/licenses/MIT
-*/
-
 #if defined(ARDUINO_ARCH_ESP8266)
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
@@ -81,15 +72,16 @@ WebServer Server;
 #endif
 
 AutoConnect       Portal(Server);
-AutoConnectConfig Config;       // Enable autoReconnect supported on v0.9.4
+AutoConnectConfig Config;
 AutoConnectAux    Timezone;
 
 basic::ZoneRegistrar zoneRegistrar(zonedb::kZoneRegistrySize, zonedb::kZoneRegistry);
-const basic::ZoneInfo *zoneInfo = &zonedb::kZoneEtc_UTC;
 BasicZoneProcessor zoneProcessor;
 
 clock::NtpClock ntpClock("pool.ntp.org");
 clock::SystemClockLoop systemClock(&ntpClock, nullptr, 60);
+
+uint32_t zoneId = zonedb::kZoneEtc_UTC.zoneId;
 
 void rootPage() {
   String  content =
@@ -108,8 +100,10 @@ void rootPage() {
     "</body>"
     "</html>";
   
+  const basic::ZoneInfo *zoneInfo2 = zoneRegistrar.getZoneInfoForId(zoneId);
+  TimeZone zone = TimeZone::forZoneInfo(zoneInfo2, &zoneProcessor);
+  
   acetime_t lastSyncTime = systemClock.getLastSyncTime();
-  TimeZone zone = TimeZone::forZoneInfo(zoneInfo, &zoneProcessor);
   auto zdt = ZonedDateTime::forEpochSeconds(lastSyncTime, zone);
   if (zdt.isError()) {
     Server.send(500, "text/html", F("Error creating ZonedDateTime"));
@@ -133,7 +127,10 @@ void showClock() {
   Serial.println(now);
   Serial.print("Last synced time: ");
   Serial.println(systemClock.getLastSyncTime());
-  TimeZone zone = TimeZone::forZoneInfo(zoneInfo, &zoneProcessor);
+
+  const basic::ZoneInfo *zoneInfo2 = zoneRegistrar.getZoneInfoForId(zoneId);
+  TimeZone zone = TimeZone::forZoneInfo(zoneInfo2, &zoneProcessor);
+
   auto zdt = ZonedDateTime::forEpochSeconds(now, zone);
   if (zdt.isError()) {
     Serial.println(F("Error creating ZonedDateTime"));
@@ -145,26 +142,25 @@ void showClock() {
   Serial.println(dateTime.getCstr());
 }
 
-void startPage() {
+void setTimezonePage() {
   // Retrieve the value of AutoConnectElement with arg function of WebServer class.
   // Values are accessible with the element name.
   String tz = Server.arg("timezone");
   tz.trim();
-  auto zoneId = tz.toInt();
+  uint32_t selectedZoneId = tz.toInt();
   if (0) {
+    Server.send(500, "text/html", F("Invalid Zone ID"));
     return;
   }
-  const basic::ZoneInfo *selectedZone = zoneRegistrar.getZoneInfoForId(zoneId);
+  // Get Zone by Id
+  const basic::ZoneInfo *selectedZone = zoneRegistrar.getZoneInfoForId(selectedZoneId);
   if (!selectedZone) {
+    Server.send(500, "text/html", F("Zone ID not found in registrar"));
     return;
   }
-  // Get Zone by name
-  //const basic::ZoneInfo *selectedZone = zoneRegistrar.getZoneInfoForName(tz.c_str());
-  //if (selectedZone) {
-    // Save it in memory
-    zoneInfo = selectedZone;
-  //}
-
+  // Save it in memory
+  zoneId = selectedZone->zoneId;
+  
   // Redirect to Root
   Server.sendHeader("Location", String("http://") + Server.client().localIP().toString() + String("/"));
   Server.send(302, "text/plain", "");
@@ -173,17 +169,12 @@ void startPage() {
 }
 
 void streamTimezones() {
-  ace_common::PrintStr<128> printer;
-
   // Send current timezone in a header
-  BasicZone currentZone(zoneInfo);
-  currentZone.printNameTo(printer);
-  Server.sendHeader("x-current-zone", printer.getCstr());
-  Server.sendHeader("x-current-zone-id", String(zoneInfo->zoneId));
-  printer.flush();
-
+  Server.sendHeader("x-current-zone-id", String(zoneId));
+  
   // TODO: What to do if this returns false?
   Server.chunkedResponseModeStart(200, "text/plain");
+  ace_common::PrintStr<128> printer;
   for(uint16_t n = 0; n < zonedb::kZoneRegistrySize; n++) {
     auto a = zonedb::kZoneRegistry[n];
     BasicZone basicZone(a);
@@ -223,7 +214,7 @@ void setup() {
   // Behavior a root path of ESP8266WebServer.
   Server.on("/", rootPage);
   // Set NTP server trigger handler
-  Server.on("/set_timezone", startPage);
+  Server.on("/set_timezone", setTimezonePage);
   Server.on("/stream_timezones", streamTimezones);
 
   // Establish a connection with an autoReconnect option.
