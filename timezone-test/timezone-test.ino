@@ -75,7 +75,7 @@ AutoConnect       Portal(Server);
 AutoConnectConfig Config;
 AutoConnectAux    Timezone;
 
-uint32_t zoneId = zonedb::kZoneEtc_UTC.zoneId;
+uint32_t zoneId = zonedb::kZoneIdEtc_UTC;
 static BasicZoneManager<1> zoneManager(zonedb::kZoneRegistrySize, zonedb::kZoneRegistry);
 
 clock::NtpClock ntpClock("pool.ntp.org");
@@ -146,11 +146,6 @@ void setTimezonePage() {
     return;
   }
   // Check zone is valid
-  //auto index = zoneManager.indexForZoneId(selectedZoneId);
-  //if (index == ZoneManager::kInvalidIndex) {
-  //  Server.send(500, "text/html", F("Zone ID not found in registrar"));
-  //  return;
-  //}
   auto selectedZone = zoneManager.createForZoneId(selectedZoneId);
   if (selectedZone.isError()) {
     Server.send(500, "text/html", F("Zone ID not found in registrar"));
@@ -176,13 +171,12 @@ void streamTimezones() {
   Server.chunkedResponseModeStart(200, "text/plain");
   ace_common::PrintStr<128> printer;
   for(uint16_t n = 0; n < zonedb::kZoneRegistrySize; n++) {
-    auto a = zonedb::kZoneRegistry[n];
-    BasicZone basicZone(a);
+    BasicZone basicZone(zonedb::kZoneRegistry[n]);
 
     // Format: Zone_Name|<zone_id>\n
     basicZone.printNameTo(printer);
     printer.print('|');
-    printer.print(a->zoneId);
+    printer.print(basicZone.zoneId());
     printer.println();
 
     Server.sendContent(printer.getCstr());
